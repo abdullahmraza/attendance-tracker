@@ -52,7 +52,7 @@
 
   <p id="stats"></p>
 
-  <label>Mark attendance date (today or last 2 days)</label>
+  <label>Mark attendance date (today or last 7 days)</label>
   <input type="date" id="attendanceDate" />
 
   <div class="actions">
@@ -86,7 +86,7 @@ const db = firebase.database();
 /******** THERAPIST CONFIG ********/
 const people = {
   adiba:    { name:'Adiba Mam',    total:20, payRule:'present' },
-  rashid:   { name:'Rashid Sir',   total:20, payRule:'present' },
+  rashid:   { name:'Rashid Sir',   total:21, payRule:'present' },
   sidharth: { name:'Sidharth Sir', total:20, payRule:'all' }
 };
 
@@ -258,4 +258,5 @@ function downloadExcel(){
 
 </body>
 </html>
+
 
