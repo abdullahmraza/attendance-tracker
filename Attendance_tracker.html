@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Advanced Therapy Attendance Tracker</title>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+  <!-- Excel -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <!-- Calendar -->
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
+
+  <style>
+    body { font-family: Arial, sans-serif; background:#f4f4f4; margin:0; padding:10px; }
+    h1 { text-align:center; }
+    .box { background:#fff; padding:15px; border-radius:10px; max-width:420px; margin:auto; box-shadow:0 2px 6px rgba(0,0,0,0.1); }
+    input, button { width:100%; padding:10px; margin:6px 0; }
+    .tabs { display:flex; gap:5px; margin:10px 0; }
+    .tabs button { flex:1; }
+    .active { background:#4285f4; color:#fff; }
+    .actions { display:flex; gap:5px; }
+    .present { background:#4caf50; color:#fff; }
+    .absent { background:#f44336; color:#fff; }
+    .undo { background:#ff9800; color:#fff; }
+    #calendar { margin-top:15px; }
+  </style>
+</head>
+<body>
+
+<h1>Therapy Attendance Tracker</h1>
+
+<div class="box" id="loginBox">
+  <input id="email" placeholder="Email" />
+  <input id="password" type="password" placeholder="Password" />
+  <button onclick="login()">Login</button>
+  <button onclick="register()">Register</button>
+</div>
+
+<div class="box" id="appBox" style="display:none;">
+
+  <div class="tabs">
+    <button onclick="selectPerson('adiba')" id="tab-adiba" class="active">Adiba</button>
+    <button onclick="selectPerson('rashid')" id="tab-rashid">Rashid</button>
+    <button onclick="selectPerson('sidharth')" id="tab-sidharth">Sidharth</button>
+  </div>
+
+  <p id="stats"></p>
+
+  <label>Mark attendance date (today or last 2 days)</label>
+  <input type="date" id="attendanceDate" />
+
+  <div class="actions">
+    <button class="present" onclick="mark('Present')">Present</button>
+    <button class="absent" onclick="mark('Absent')">Absent</button>
+    <button class="undo" onclick="undo()">Undo</button>
+  </div>
+
+  <button onclick="downloadExcel()">Download Excel</button>
+  <button onclick="logout()">Logout</button>
+
+  <div id="calendar"></div>
+</div>
+
+<script>
+/******** FIREBASE CONFIG ********/
+const firebaseConfig = {
+  apiKey: "AIzaSyDV8cpZi4CCXMc28QA-tq0V9mUrS5fsss4",
+  authDomain: "attendance-tracker-ab295.firebaseapp.com",
+  databaseURL: "https://attendance-tracker-ab295-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "attendance-tracker-ab295",
+  storageBucket: "attendance-tracker-ab295.firebasestorage.app",
+  messagingSenderId: "826153572092",
+  appId: "1:826153572092:web:33fdef063a3d9ef3a12979"
+};
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.database();
+
+/******** THERAPIST CONFIG ********/
+const people = {
+  adiba:    { name:'Adiba Mam',    total:20, payRule:'present' },
+  rashid:   { name:'Rashid Sir',   total:20, payRule:'present' },
+  sidharth: { name:'Sidharth Sir', total:20, payRule:'all' }
+};
+
+let current = 'adiba';
+let uid = null;
+let calendar;
+
+/******** AUTH ********/
+auth.onAuthStateChanged(user => {
+  if (user) {
+    uid = user.uid;
+    loginBox.style.display='none';
+    appBox.style.display='block';
+    initCalendar();
+    loadStats();
+    loadCalendar();
+  } else {
+    loginBox.style.display='block';
+    appBox.style.display='none';
+  }
+});
+
+function register(){ auth.createUserWithEmailAndPassword(email.value,password.value); }
+function login(){ auth.signInWithEmailAndPassword(email.value,password.value); }
+function logout(){ auth.signOut(); }
+
+function selectPerson(p){
+  current=p;
+  document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab-'+p).classList.add('active');
+  loadStats();
+  loadCalendar();
+}
+
+/******** DATE LIMIT ********/
+function isValidDate(dateStr){
+  const today = new Date(); today.setHours(0,0,0,0);
+  const sel = new Date(dateStr); sel.setHours(0,0,0,0);
+  const diff = (today - sel) / (1000*60*60*24);
+  return diff >= 0 && diff <= 2;
+}
+
+/******** STATS ********/
+function loadStats(){
+  db.ref(`users/${uid}/history/${current}`).once('value').then(snap=>{
+    const all = snap.val() || [];
+    const active = all.filter(r=>!r.closed);
+    const p = active.filter(r=>r.status==='Present').length;
+    const a = active.filter(r=>r.status==='Absent').length;
+    const counted = people[current].payRule === 'present' ? p : (p + a);
+    stats.innerText =
+      `${people[current].name} | Present: ${p} | Absent: ${a} | Payment count: ${counted}/${people[current].total}`;
+  });
+}
+
+/******** MARK ATTENDANCE ********/
+function mark(status){
+  const date = attendanceDate.value || new Date().toISOString().split('T')[0];
+  if (!isValidDate(date)){
+    alert('You can mark attendance only for today or last 2 days');
+    return;
+  }
+
+  const ref = db.ref(`users/${uid}/history/${current}`);
+  ref.once('value').then(snap=>{
+    let all = snap.val() || [];
+
+    if (all.some(r=>r.date===date && !r.closed)){
+      alert('Attendance already marked for this date');
+      return;
+    }
+
+    const active = all.filter(r=>!r.closed);
+    const p = active.filter(r=>r.status==='Present').length;
+    const a = active.filter(r=>r.status==='Absent').length;
+
+    all.push({ date, status, closed:false, ts:Date.now() });
+
+    const newCount =
+      people[current].payRule === 'present'
+        ? (status==='Present' ? p+1 : p)
+        : (p + a + 1);
+
+    if (newCount >= people[current].total){
+      all = all.map(r=> r.closed ? r : {...r, closed:true});
+      alert(`Payment cycle completed for ${people[current].name}. Please pay again.`);
+    }
+
+    ref.set(all).then(()=>{
+      loadStats();
+      loadCalendar();
+    });
+  });
+}
+
+/******** UNDO ********/
+function undo(){
+  const ref = db.ref(`users/${uid}/history/${current}`);
+  ref.once('value').then(snap=>{
+    let all = snap.val() || [];
+    for (let i=all.length-1;i>=0;i--){
+      if (!all[i].closed){ all.splice(i,1); break; }
+    }
+    ref.set(all).then(()=>{ loadStats(); loadCalendar(); });
+  });
+}
+
+/******** CALENDAR ********/
+function initCalendar(){
+  calendar = new FullCalendar.Calendar(document.getElementById('calendar'),{
+    initialView:'dayGridMonth', height:400
+  });
+  calendar.render();
+}
+
+function loadCalendar(){
+  db.ref(`users/${uid}/history/${current}`).once('value').then(snap=>{
+    const data = snap.val() || [];
+    calendar.removeAllEvents();
+    data.forEach(r=>{
+      calendar.addEvent({
+        title:r.status,
+        start:r.date,
+        color:r.status==='Present'?'green':'red'
+      });
+    });
+  });
+}
+
+/******** EXCEL EXPORT ********/
+function downloadExcel(){
+  const wb = XLSX.utils.book_new();
+  const promises = [];
+
+  for (const key in people){
+    promises.push(
+      db.ref(`users/${uid}/history/${key}`).once('value').then(snap=>{
+        const data = snap.val() || [];
+
+        const history = [['Date','Status','Closed']];
+        data.forEach(r=>history.push([r.date,r.status,r.closed?'YES':'NO']));
+        XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(history),people[key].name);
+
+        const monthly = {};
+        data.forEach(r=>{
+          const m = r.date.slice(0,7);
+          if (!monthly[m]) monthly[m]={p:0,a:0};
+          if (r.status==='Present') monthly[m].p++;
+          if (r.status==='Absent') monthly[m].a++;
+        });
+
+        const summary=[['Month','Present','Absent','Total']];
+        Object.keys(monthly).sort().forEach(m=>{
+          summary.push([m,monthly[m].p,monthly[m].a,monthly[m].p+monthly[m].a]);
+        });
+
+        XLSX.utils.book_append_sheet(
+          wb,
+          XLSX.utils.aoa_to_sheet(summary),
+          people[key].name+' Monthly Summary'
+        );
+      })
+    );
+  }
+
+  Promise.all(promises).then(()=>XLSX.writeFile(wb,'Full_Attendance_History.xlsx'));
+}
+</script>
+
+</body>
+</html>
