@@ -48,6 +48,7 @@
     <button onclick="selectPerson('adiba')" id="tab-adiba" class="active">Adiba</button>
     <button onclick="selectPerson('rashid')" id="tab-rashid">Rashid</button>
     <button onclick="selectPerson('sidharth')" id="tab-sidharth">Sidharth</button>
+    <button onclick="selectPerson('prachi')" id="tab-prachi">Prachi</button>
   </div>
 
   <p id="stats"></p>
@@ -87,7 +88,8 @@ const db = firebase.database();
 const people = {
   adiba:    { name:'Adiba Mam',    total:20, payRule:'present' },
   rashid:   { name:'Rashid Sir',   total:21, payRule:'present' },
-  sidharth: { name:'Sidharth Sir', total:10, payRule:'all' }
+  sidharth: { name:'Sidharth Sir', total:10, payRule:'all' },
+  prachi:   { name:'Prachi Mam', total:10, payRule:'all' }
 };
 
 let current = 'adiba';
